@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Our Constellation</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{--bg1:#1b3c6b;--bg2:#0b1c33;--accent:gold;}
+  html,body{height:100%;margin:0;font-family:'Cinzel',serif;background:
+    radial-gradient(circle at top,var(--bg1),var(--bg2) 70%,#050914);color:#fff;overflow:hidden}
+  .title{position:fixed;top:20px;width:100%;text-align:center;font-size:1.8rem}
+  .subtitle{position:fixed;top:60px;width:100%;text-align:center;color:#ddd;font-size:1rem}
+
+  /* stars */
+  .stars-container{position:absolute;inset:0}
+  .star{
+    position:absolute;
+    font-size:18px;
+    line-height:1;
+    cursor:pointer;
+    background:transparent;
+    border:none;
+    user-select:none;
+    filter:drop-shadow(0 0 6px var(--accent));
+    transform-origin:center;
+    animation:twinkle 2s infinite alternate;
+    padding:0;
+  }
+  @keyframes twinkle{
+    from{transform:scale(1);opacity:.7}
+    to{transform:scale(1.35);opacity:1}
+  }
+
+  /* popup */
+  #popup{
+    position:fixed;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    width:85%;
+    max-width:520px;
+    background:rgba(10,15,30,.96);
+    border:1px solid var(--accent);
+    color:white;
+    padding:22px;
+    border-radius:14px;
+    display:none;
+    text-align:center;
+    box-shadow:0 0 30px rgba(218,165,32,.18);
+    z-index:50;
+  }
+  #popup h2{color:var(--accent);margin:0 0 8px}
+  #popup p{margin:0 0 12px;color:#eee}
+  .controls{display:flex;gap:10px;justify-content:center}
+  .btn{
+    padding:8px 14px;border-radius:8px;border:0;background:var(--accent);font-weight:700;cursor:pointer;
+  }
+  .btn.secondary{background:transparent;color:var(--accent);border:1px solid rgba(218,165,32,.25)}
+
+  /* footer hint */
+  .hint{position:fixed;left:12px;bottom:12px;color:#bbb;font-size:.9rem}
+
+  /* responsive */
+  @media (max-width:420px){
+    .title{font-size:1.4rem}
+    .star{font-size:16px}
+  }
+</style>
+</head>
+<body>
+  <div class="title">HBD, Love 🪷</div>
+  <div class="subtitle">Click a star to open a memory</div>
+
+  <div class="stars-container" id="stars"></div>
+
+  <!-- optional external audio file (if you have it) -->
+  <audio id="music" preload="auto">
+    <source src="music.mp3" type="audio/mpeg">
+  </audio>
+
+  <div id="popup" role="dialog" aria-modal="true" aria-labelledby="date">
+    <h2 id="date"></h2>
+    <p id="text"></p>
+    <div class="controls">
+      <button class="btn" id="closeBtn">Close</button>
+      <button class="btn secondary" id="toggleSoundBtn">Toggle sound</button>
+    </div>
+  </div>
+
+  <div class="hint">If you can't hear sound, click any star once (user gesture) or press the "Toggle sound" button.</div>
+
+<script>
+/* Memories array (from your original data) */
+const memories = [
+  {date:"16 Jul 2024", text:"Hi buddy?"},
+  {date:"29 Sep 2024", text:"BOYFRIENDS (finally)"},
+  {date:"22 Jul 2024", text:"I think I like you, maybe"},
+  {date:"27 Jul 2024", text:"I'll sing for you for free, any one else can pay"},
+  {date:"1 May 2026", text:"A mom returns to her lost child (fuck you)"},
+  {date:"27 May 2026", text:"BOYFRIENDS AGAIN YAYY"},
+  {date:"6 Jun 2026", text:"you said you're trying for me, and I really love that"},
+  {date:"19 Jun 2026", text:"I got my johna!! (that's a win and important date yup)"},
+  {date:"1 Jan 2025", text:"kokito!! (we made this up but whatever)"},
+  {date:"1 Jul 2005", text:"We make a full moon yk? Waning & Waxing crescent moon"}
+];
+
+/* Create 10 stars positioned similar to your initial layout.
+   Using buttons improves accessibility and makes clicks always work. */
+const starPositions = [
+  {top:"20%", left:"15%"},
+  {top:"30%", left:"60%"},
+  {top:"25%", left:"80%"},
+  {top:"50%", left:"25%"},
+  {top:"60%", left:"70%"},
+  {top:"40%", left:"45%"},
+  {top:"75%", left:"15%"},
+  {top:"78%", left:"85%"},
+  {top:"65%", left:"45%"},
+  {top:"15%", left:"50%"}
+];
+
+const starsContainer = document.getElementById('stars');
+starPositions.forEach((pos, i) => {
+  const btn = document.createElement('button');
+  btn.className = 'star';
+  btn.style.top = pos.top;
+  btn.style.left = pos.left;
+  btn.style.fontSize = (14 + Math.round(Math.random()*10)) + 'px';
+  btn.setAttribute('aria-label', `Memory ${i+1}`);
+  btn.innerText = '⭐';
+  btn.addEventListener('click', () => showMessage(i));
+  btn.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); showMessage(i); }});
+  starsContainer.appendChild(btn);
+});
+
+/* Audio handling: try external file first; fallback to generated tone via WebAudio API */
+const audioEl = document.getElementById('music');
+let audioCtx = null;
+let toneNodes = null;
+let soundEnabled = true;
+
+/* start a low-volume ambient tone loop as fallback */
+function startToneLoop(){
+  try{
+    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // if already running, resume
+    if(audioCtx.state === 'suspended') audioCtx.resume();
+    if(toneNodes) return; // already running
+
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.02; // very low volume
+    gain.connect(audioCtx.destination);
+
+    const osc1 = audioCtx.createOscillator();
+    osc1.type = 'sine'; osc1.frequency.value = 220;
+
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'sine'; osc2.frequency.value = 440;
+
+    const merger = audioCtx.createGain();
+    osc1.connect(merger);
+    osc2.connect(merger);
+    merger.connect(gain);
+
+    osc1.start();
+    osc2.start();
+
+    toneNodes = {osc1, osc2, gain, merger};
+  }catch(err){
+    console.warn('startToneLoop failed:', err);
+  }
+}
+
+function stopToneLoop(){
+  if(!toneNodes) return;
+  try{
+    toneNodes.osc1.stop();
+    toneNodes.osc2.stop();
+    toneNodes.osc1.disconnect();
+    toneNodes.osc2.disconnect();
+    toneNodes.merger.disconnect();
+    toneNodes.gain.disconnect();
+  }catch(err){}
+  toneNodes = null;
+}
+
+/* Try to play the external audio first; on failure, fallback to tone */
+function playSound(){
+  if(!soundEnabled) return;
+  if(audioEl && audioEl.querySelector('source')){
+    audioEl.play().then(()=> {
+      // playing external audio succeeded
+    }).catch(err => {
+      // autoplay blocked or file missing — fallback
+      console.warn('External audio play failed, falling back to tone:', err);
+      startToneLoop();
+    });
+  } else {
+    startToneLoop();
+  }
+}
+
+function stopSound(){
+  if(audioEl){
+    try{ audioEl.pause(); audioEl.currentTime = 0; }catch(e){}
+  }
+  stopToneLoop();
+}
+
+/* Popup handling */
+const popup = document.getElementById('popup');
+const dateEl = document.getElementById('date');
+const textEl = document.getElementById('text');
+const closeBtn = document.getElementById('closeBtn');
+const toggleSoundBtn = document.getElementById('toggleSoundBtn');
+
+function showMessage(i){
+  const mem = memories[i];
+  if(!mem){
+    console.error('No memory at index', i);
+    return;
+  }
+  dateEl.textContent = mem.date;
+  textEl.textContent = mem.text;
+  popup.style.display = 'block';
+  popup.focus();
+  // user click is a valid gesture to start audio in most browsers
+  playSound();
+  console.log('showMessage', i, mem);
+}
+
+function closePopup(){
+  popup.style.display = 'none';
+  stopSound();
+}
+
+closeBtn.addEventListener('click', closePopup);
+toggleSoundBtn.addEventListener('click', () => {
+  soundEnabled = !soundEnabled;
+  toggleSoundBtn.textContent = soundEnabled ? 'Sound: ON' : 'Sound: OFF';
+  if(!soundEnabled) stopSound();
+  else {
+    // resume audio context if needed
+    if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    // try to play
+    playSound();
+  }
+});
+
+/* Accessibility: close popup with Escape */
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && popup.style.display === 'block') closePopup();
+});
+
+/* Info for debugging in console */
+console.log('Page ready. If you have a music.mp3 file in the same folder it will be used; otherwise a soft generated tone will play on click.');
+</script>
+</body>
+</html>
